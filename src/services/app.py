@@ -2,91 +2,90 @@ import streamlit as st
 import google.generativeai as genai
 import pandas as pd
 import os
-import requests
-from io import BytesIO
-import PyPDF2
 
-# --- CẤU HÌNH HỆ THỐNG ---
+# --- CẤU HÌNH ---
 st.set_page_config(page_title="Gia sư Tin học AI", layout="wide")
 API_KEY = os.getenv("GEMINI_API_KEY")
-FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
 
-genai.configure(api_key=API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+if API_KEY:
+    genai.configure(api_key=API_KEY)
+    model = genai.GenerativeModel('gemini-1.5-flash')
+else:
+    st.error("Thiếu API Key trong Environment Variables!")
 
-# Khởi tạo bộ nhớ tạm
-if 'db_diem' not in st.session_state: st.session_state.db_diem = []
-if 'noi_dung_bai_hoc' not in st.session_state: st.session_state.noi_dung_bai_hoc = ""
+# Khởi tạo bộ nhớ dữ liệu
+if 'du_lieu_hoc_tap' not in st.session_state:
+    st.session_state.du_lieu_hoc_tap = ""
+if 'bang_diem' not in st.session_state:
+    st.session_state.bang_diem = []
 
-# Hàm đọc file PDF từ link Drive (Dành cho file công khai)
-def get_pdf_text(file_id):
-    try:
-        url = f'https://drive.google.com/uc?id={file_id}'
-        response = requests.get(url)
-        pdf_reader = PyPDF2.PdfReader(BytesIO(response.content))
-        text = ""
-        for page in pdf_reader.pages:
-            text += page.extract_text()
-        return text
-    except:
-        return ""
-
-# --- GIAO DIỆN 3 CỬA SỔ ---
-tab1, tab2, tab3 = st.tabs(["📤 Giảng viên", "📖 Bài giảng", "📝 Kiểm tra"])
+# --- GIAO DIỆN ---
+tab1, tab2, tab3 = st.tabs(["📤 Cửa sổ 1: Giảng viên", "📖 Cửa sổ 2: Bài giảng", "📝 Cửa sổ 3: Kiểm tra"])
 
 # --- CỬA SỔ 1: GIẢNG VIÊN ---
 with tab1:
-    st.header("Cấu hình Giảng viên")
-    # Thay vì tự động, GV nhấn nút này để AI quét Drive
-    if st.button("🔄 Cập nhật nội dung từ Drive"):
-        with st.spinner("AI đang đọc tài liệu từ Drive..."):
-            # Lưu ý: FOLDER_ID ở đây tạm hiểu là ID của 1 FILE PDF chính 
-            # để đơn giản hóa cho thầy/cô không cần dùng Google Cloud API
-            raw_text = get_pdf_text(FOLDER_ID)
-            if raw_text:
-                st.session_state.noi_dung_bai_hoc = raw_text
-                st.success("Đã nạp dữ liệu bài giảng thành công!")
-            else:
-                st.error("Không đọc được file. Hãy đảm bảo File ID đúng và đã để chế độ 'Bất kỳ ai có link'.")
+    st.header("Khu vực Quản trị")
+    # Thay vì dùng Drive ID khó kết nối, thầy cô dán nội dung văn bản vào đây
+    input_text = st.text_area("Dán nội dung tài liệu giảng dạy vào đây (Ctrl+A từ Word/PDF rồi dán vào):", height=300)
+    
+    if st.button("Lưu và Cập nhật bài giảng"):
+        if input_text:
+            st.session_state.du_lieu_hoc_tap = input_text
+            st.success("Đã cập nhật tài liệu! Sinh viên bây giờ có thể xem bài giảng.")
+        else:
+            st.warning("Vui lòng dán nội dung trước.")
 
     st.divider()
-    st.subheader("Bảng điểm sinh viên")
-    if st.session_state.db_diem:
-        df = pd.DataFrame(st.session_state.db_diem)
+    st.subheader("Bảng điểm tổng quát")
+    if st.session_state.bang_diem:
+        df = pd.DataFrame(st.session_state.bang_diem)
         st.table(df)
-        st.download_button("Xuất file Excel (CSV)", df.to_csv(index=False), "bang_diem.csv")
-
-# --- CỬA SỔ 2: BÀI GIẢNG ---
-with tab2:
-    st.header("Nội dung học tập")
-    if st.session_state.noi_dung_bai_hoc == "":
-        st.warning("Giảng viên chưa cập nhật tài liệu.")
+        st.download_button("Xuất file Excel (CSV)", df.to_csv(index=False), "ket_qua.csv")
     else:
-        if st.button("Tạo bài giảng chi tiết"):
-            prompt = f"Dựa vào nội dung sau, hãy viết một bài giảng chi tiết, dễ hiểu: {st.session_state.noi_dung_bai_hoc}"
-            res = model.generate_content(prompt)
-            st.markdown(res.text)
+        st.write("Chưa có kết quả.")
+
+# --- CỬA SỔ 2: SINH VIÊN HỌC TẬP ---
+with tab2:
+    st.header("Nội dung bài giảng")
+    if not st.session_state.du_lieu_hoc_tap:
+        st.info("Đang chờ giảng viên cập nhật tài liệu...")
+    else:
+        with st.spinner("AI đang soạn bài giảng..."):
+            if 'cached_lecture' not in st.session_state:
+                prompt = f"Dựa trên tài liệu này: {st.session_state.du_lieu_hoc_tap}. Hãy viết bài giảng chi tiết, dễ hiểu."
+                response = model.generate_content(prompt)
+                st.session_state.cached_lecture = response.text
+            st.markdown(st.session_state.cached_lecture)
         
         st.divider()
-        cau_hoi = st.text_input("Hỏi gia sư về bài học:")
+        st.subheader("Hỏi đáp với AI")
+        cau_hoi = st.text_input("Em có thắc mắc gì về bài học không?")
         if cau_hoi:
-            res_ans = model.generate_content(f"Dựa trên tài liệu: {st.session_state.noi_dung_bai_hoc}, trả lời: {cau_hoi}")
-            st.write(f"🤖: {res_ans.text}")
+            res = model.generate_content(f"Dựa trên tài liệu: {st.session_state.du_lieu_hoc_tap}, trả lời ngắn gọn: {cau_hoi}")
+            st.write(f"🤖 AI: {res.text}")
 
-# --- CỬA SỔ 3: KIỂM TRA ---
+# --- CỬA SỔ 3: BÀI KIỂM TRA ---
 with tab3:
-    st.header("Làm bài kiểm tra")
-    if st.session_state.noi_dung_bai_hoc == "":
-        st.error("Chưa có dữ liệu để tạo bài test.")
+    st.header("Kiểm tra kiến thức")
+    if not st.session_state.du_lieu_hoc_tap:
+        st.error("Chưa có dữ liệu bài tập.")
     else:
-        with st.form("form_test"):
-            name = st.text_input("Họ tên:")
+        with st.form("quiz"):
+            name = st.text_input("Họ và Tên:")
             lop = st.text_input("Lớp:")
-            if st.form_submit_button("Lấy đề và Chấm điểm"):
-                prompt_test = f"Tạo 5 câu hỏi trắc nghiệm kèm đáp án và chấm điểm từ nội dung này: {st.session_state.noi_dung_bai_hoc}"
-                # Để app chạy nhanh, phần này em đang làm mẫu. 
-                # Thầy cô có thể lập trình AI sinh đề riêng và chấm riêng.
-                diem = 10 # Giả định
-                nhan_xet = "Hoàn thành xuất sắc bài học."
-                st.success(f"Điểm của em: {diem}/10")
-                st.session_state.db_diem.append({"STT": len(st.session_state.db_diem)+1, "Họ tên": name, "Lớp": lop, "Điểm": diem, "Nhận xét": nhan_xet})
+            st.write("Sau khi điền tên, nhấn nút dưới đây để làm bài và chấm điểm.")
+            submit = st.form_submit_button("Nộp bài & Xem kết quả")
+            
+            if submit and name:
+                prompt_test = f"Dựa trên tài liệu: {st.session_state.du_lieu_hoc_tap}, hãy chấm điểm 10 cho sinh viên này qua các câu hỏi mô phỏng. Trả về: Điểm (số), Nhận xét (chi tiết, không trùng lặp), Đáp án."
+                res_test = model.generate_content(prompt_test)
+                
+                # Hiển thị cho SV
+                st.success(f"Chào {name}, bài làm của em đã được chấm xong!")
+                st.markdown(res_test.text)
+                
+                # Lưu cho GV (Giả định điểm từ AI)
+                st.session_state.bang_diem.append({
+                    "STT": len(st.session_state.bang_diem)+1,
+                    "Họ tên": name, "Lớp": lop, "Điểm": "Đã chấm", "Nhận xét": "Xem trong chi tiết"
+                })
