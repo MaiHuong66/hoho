@@ -2,3 +2,5 @@ streamlit
 google-generativeai
 pandas
 requests
+PyPDF2
+python-docx
