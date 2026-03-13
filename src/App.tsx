@@ -58,6 +58,87 @@ export default function App() {
   const [lastResult, setLastResult] = useState<TestResult | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [globalFileId, setGlobalFileId] = useState('');
+  const [greeting, setGreeting] = useState('');
+  const [summary, setSummary] = useState('');
+
+  useEffect(() => {
+    // Load results from localStorage for persistence without Firebase
+    const savedResults = localStorage.getItem('tutor_results');
+    if (savedResults) setResults(JSON.parse(savedResults));
+
+    // Fetch Global Config and Persistent Content
+    const initPersistentContent = async () => {
+      try {
+        const configRes = await fetch('/api/config');
+        const config = await configRes.json();
+        if (config.globalFileId) {
+          setGlobalFileId(config.globalFileId);
+          await fetchAndProcessDriveFile(config.globalFileId);
+        }
+      } catch (error) {
+        console.error("Failed to init persistent content:", error);
+      }
+    };
+    initPersistentContent();
+  }, []);
+
+  useEffect(() => {
+    if (results.length > 0) {
+      localStorage.setItem('tutor_results', JSON.stringify(results));
+    }
+  }, [results]);
+
+  const fetchAndProcessDriveFile = async (fileId: string) => {
+    setIsLoading(true);
+    try {
+      const res = await fetch(`/api/drive/${fileId}`);
+      const data = await res.json();
+      if (data.content) {
+        const doc: Document = {
+          id: 'drive-main',
+          title: `Tài liệu từ Drive (${fileId})`,
+          content: data.content,
+          uploadedAt: new Date()
+        };
+        setDocuments([doc]);
+        
+        // Generate Lecture, Test, and Greeting/Summary
+        const [lecture, questions] = await Promise.all([
+          geminiService.generateLecture(data.content),
+          geminiService.generateTest(data.content)
+        ]);
+        
+        setCurrentLecture(lecture);
+        setTestQuestions(questions);
+        
+        // Simple greeting and summary
+        setGreeting(`Chào mừng bạn đến với bài học: ${lecture.title}. Tôi là Trợ lý Gia sư Tin học của bạn.`);
+        setSummary(lecture.conclusion);
+      }
+    } catch (error) {
+      console.error(error);
+      alert("Không thể tải tài liệu từ Google Drive. Vui lòng kiểm tra File ID.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const updateGlobalFileId = async (fileId: string) => {
+    try {
+      const res = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileId })
+      });
+      if (res.ok) {
+        setGlobalFileId(fileId);
+        await fetchAndProcessDriveFile(fileId);
+      }
+    } catch (error) {
+      alert("Lỗi khi cập nhật File ID.");
+    }
+  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -525,6 +606,32 @@ export default function App() {
                 {/* Management Section */}
                 <div className="bg-white p-8 rounded-[32px] shadow-sm border border-gray-100">
                   <h3 className="font-serif text-2xl font-bold mb-4 flex items-center gap-2">
+                    <Settings className="w-6 h-6 text-[#5A5A40]" />
+                    Cấu hình Hệ thống
+                  </h3>
+                  <div className="space-y-4 mb-8">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Google Drive File ID (Persistent Memory)</label>
+                      <div className="flex gap-2">
+                        <input 
+                          type="text" 
+                          value={globalFileId}
+                          onChange={(e) => setGlobalFileId(e.target.value)}
+                          placeholder="Nhập File ID..."
+                          className="flex-1 p-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#5A5A40] text-sm"
+                        />
+                        <button 
+                          onClick={() => updateGlobalFileId(globalFileId)}
+                          className="px-4 bg-[#5A5A40] text-white rounded-xl hover:bg-[#4A4A30] transition-colors"
+                        >
+                          Lưu
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-gray-400 mt-1">ID này sẽ được dùng để tải bài giảng tự động cho mọi sinh viên.</p>
+                    </div>
+                  </div>
+
+                  <h3 className="font-serif text-2xl font-bold mb-4 flex items-center gap-2">
                     <Table className="w-6 h-6 text-[#5A5A40]" />
                     Quản lý kết quả
                   </h3>
@@ -585,6 +692,25 @@ export default function App() {
             >
               {/* Lecture Content */}
               <div className="lg:col-span-2 space-y-6">
+                {/* Greeting & Summary Banner */}
+                {greeting && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-[#5A5A40] text-white p-8 rounded-[32px] shadow-lg relative overflow-hidden"
+                  >
+                    <div className="relative z-10">
+                      <h2 className="font-serif text-2xl font-bold mb-2">{greeting}</h2>
+                      <p className="text-white/80 text-sm leading-relaxed max-w-2xl">
+                        <strong>Tóm tắt bài giảng:</strong> {summary}
+                      </p>
+                    </div>
+                    <div className="absolute -right-10 -bottom-10 opacity-10">
+                      <GraduationCap size={200} />
+                    </div>
+                  </motion.div>
+                )}
+
                 <div className="bg-white p-8 rounded-[32px] shadow-sm border border-gray-100 min-h-[600px]">
                   {!currentLecture ? (
                     <div className="h-full flex flex-col items-center justify-center text-center p-12">
